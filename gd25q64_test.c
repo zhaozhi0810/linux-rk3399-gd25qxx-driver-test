@@ -2,7 +2,7 @@
 * @Author: dazhi
 * @Date:   2022-11-05 15:20:06
 * @Last Modified by:   dazhi
-* @Last Modified time: 2022-11-09 11:18:45
+* @Last Modified time: 2022-11-10 17:21:15
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +32,8 @@ static uint32_t erase_sector_offset;
 static int verbose;
 static int erase_chip = 0;   //擦除整个芯片
 static char *input_tx = NULL;
+static char *input_filename = NULL;
+static char *output_filename = NULL;
 static int start_address;
 static int op_lenght;
 static int operation = 0;   //0读操作，1写操作，2是擦除操作
@@ -54,14 +56,16 @@ void print_data(const char *title, char *dat, int count)
 
 static void print_usage(const char *prog)
 {
-   printf("Usage: %s [-DsbdlHOLC3]\n", prog);
+   printf("Usage: %s [-DveEalwio]\n", prog);
    puts("  -D --device   device to use (default /dev/spidev1.1)\n"
         "  -v --verbose  Verbose (show tx buffer)\n"
         "  -e --erase sector  erase sector \n"
         "  -E --erase chip  erase chip\n"
         "  -a --address  start address (default 0)\n"
         "  -l --lenght  operation bytes count (default 16,or(-p) string length) \n"
-        "  -w --write data           Send data (e.g. \"1234\\xde\\xad\")\n"
+        "  -w --write data   Send data to flash (e.g. \"1234\\xde\\xad\")\n"
+        "  -i --inputfile    read inputfile and write to flash\n"
+        "  -o --outputfile   read from flash and write to outputfile\n"
 );
    exit(1);
 }
@@ -77,11 +81,13 @@ static void parse_opts(int argc, char *argv[])
          { "address", 1, 0, 'a' },
          { "lenght", 1, 0, 'l' },
          { "write", 1, 0, 'w' },
+         { "inputfile", 1, 0, 'i' },
+         { "outputfile", 1, 0, 'o' },
          { NULL, 0, 0, 0 },
       };
       int c;
 
-      c = getopt_long(argc, argv, "D:e:Ew:va:l:", lopts, NULL);
+      c = getopt_long(argc, argv, "D:e:Ew:va:l:i:o:", lopts, NULL);
 
       if (c == -1)
       {
@@ -124,7 +130,20 @@ static void parse_opts(int argc, char *argv[])
             operation = 1;
          printf("input_tx = %s\n",input_tx);
          break;
+      case 'i':
+         input_filename = optarg;
 
+         if(input_filename)  //不为空
+            operation = 3;
+         printf("input_filename = %s\n",input_filename);
+         break;
+      case 'o':
+         output_filename = optarg;
+
+         if(output_filename)  //不为空
+            operation = 4;
+         printf("output_filename = %s\n",output_filename);
+         break;   
       default:
          print_usage(argv[0]);
          break;
@@ -139,6 +158,9 @@ static void parse_opts(int argc, char *argv[])
 int main(int argc, char *argv[])
 {
    int fd,ret,i;
+   int buflen = 16;    //分配空间的大小
+   int fd_file;
+
 //   int count = num;
 //   int offset = 0; 
 //   int rw = -1;  
@@ -168,16 +190,31 @@ int main(int argc, char *argv[])
    /*解析传入的参数*/
    // offset =atoi(argv[1]);
    // printf("offset = %d\n", offset);
-   if(op_lenght <= 0 || op_lenght > 4096)
-      op_lenght = 16;
-   buf = malloc(op_lenght + 1);
+   if(op_lenght <= 0)
+   {
+   		buflen = 16;
+   }
+   else if(op_lenght > 4096)
+   {
+		buflen = 4096;   //最多读4096
+   }
+   else
+      buflen = op_lenght;
+
+   if(4==operation || 3==operation)  //文件读写时，缓存大一下
+   {
+   		buflen = 4096;   //最多读4096
+   }
+
+
+   buf = malloc(buflen);
    if(!buf)
    {
       printf("ERROR: malloc\n");
       return -1;
    }
 
-   memset(buf,0,op_lenght + 1);
+   memset(buf,0,buflen);
 
     /*打开设备文件*/
    fd = open(device, O_RDWR);
@@ -188,43 +225,74 @@ int main(int argc, char *argv[])
    }
 
 
-   if(!operation)  //读操作
+   if(!operation || 4==operation)  //读操作
    {
       printf("operation : read \n");
 
       ret = lseek(fd,start_address,SEEK_SET);
       printf("lseek = %d\n",ret);
       
-      ret = read(fd, buf, op_lenght);
+      ret = read(fd, buf, buflen);
       if(ret < 0)
       {
          printf("read from w25qxx error\n");
          close(fd);
          return ret;
       }
-
-      /*打印数据*/
-      print_data("read from w25qxx: \n\r",buf, op_lenght);
+      if(verbose)/*打印数据*/     
+      	print_data("read from w25qxx: \n\r",buf, buflen);
 
    }
-   else if(1==operation){   //写操作
+   else if(1==operation || 3==operation){   //写操作
       printf("operation : write \n");
-
-
-      /*写入数据*/ 
+      
       lseek(fd,start_address,SEEK_SET);
-      ret = write(fd,input_tx,strlen(input_tx));
-      if(ret < 0)
-      {
-         printf("write to w25qxx error ret = %d\n",ret);
-         close(fd);
-         return ret;
-      }   
-      /*打印数据*/
-      print_data("write to w25qxx: \n\r", input_tx, strlen(input_tx));
 
+      if(3==operation)
+      {
+         fd_file = open(input_filename,O_RDONLY);
+         if(fd_file < 0)
+         {
+            printf("ERROR: open %s error!\n",input_filename);
+            close(fd);
+            return -1;
+         }
+
+         while(1)
+         {
+            //考虑一下文件太大怎么办？
+            ret = read(fd_file,buf,buflen);
+            if(ret > 0)
+            {
+               ret = write(fd,buf,ret);
+               if(ret < 0)
+               {
+                  printf("file write to w25qxx error ret = %d\n",ret);
+                  close(fd);
+                  return ret;
+               }
+            } 
+            else{
+               break;
+            }  
+         }
+         printf("file write success\n");
+      }
+      else
+      {
+          /*写入数据*/          
+         ret = write(fd,input_tx,strlen(input_tx));
+         if(ret < 0)
+         {
+            printf("write to w25qxx error ret = %d\n",ret);
+            close(fd);
+            return ret;
+         }
+         if(verbose)   /*打印数据*/        
+            print_data("write to w25qxx: \n\r", input_tx, strlen(input_tx));        
+      }
    }
-   else {  //擦除操作
+   else if(2==operation){  //擦除操作
       printf("operation : erase \n");
       if(erase_chip)
       {

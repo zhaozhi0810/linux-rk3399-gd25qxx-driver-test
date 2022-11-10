@@ -2,7 +2,7 @@
 * @Author: dazhi
 * @Date:   2022-11-08 13:54:23
 * @Last Modified by:   dazhi
-* @Last Modified time: 2022-11-09 19:46:19
+* @Last Modified time: 2022-11-10 17:21:57
 */
 #include <linux/init.h>
 #include <linux/module.h>
@@ -449,7 +449,10 @@ spidev_sync_write(struct spidev_data *spidev, size_t len)
 	status = spidev_sync(spidev, &m);
 	spi_gd25q_wait_ready(spidev->spi);
 
-	spidev->cur_addr += len;   //更新当前地址
+	status -= 4;
+	printk("GD25qxx：spidev_sync_write status = %d  len = %lu\n",status,len);
+	if(status > 0)
+		spidev->cur_addr += status;   //更新当前地址
 
 	return status;
 }
@@ -728,6 +731,13 @@ spidev_sync_read(struct spidev_data *spidev, size_t len)
 	spi_message_add_tail(&t[2], &m);
 	status = spidev_sync(spidev, &m);
 	spi_gd25q_wait_ready(spidev->spi);
+
+
+	status -= 4;  //多发了4个字节
+	printk("GD25qxx：spidev_sync_read status = %d  len = %lu\n",status,len);
+	if(status > 0)
+		spidev->cur_addr += status;   //指针向后移动
+
 	return status;
 }
 
@@ -737,26 +747,47 @@ spidev_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
 	struct spidev_data	*spidev;
 	ssize_t			status = 0;
-
+	ssize_t al_read_size = 0;
+	ssize_t ready_read_size = 0;
 	/* chipselect only toggles at start or end of operation */
-	if (count > bufsiz)
-		return -EMSGSIZE;
+	// if (count > bufsiz)
+	// 	return -EMSGSIZE;
 
 	spidev = filp->private_data;
-
-	mutex_lock(&spidev->buf_lock);
-	status = spidev_sync_read(spidev, count);
-	if (status > 0) {
-		unsigned long	missing;
-
-		missing = copy_to_user(buf, spidev->rx_buffer, status);
-		if (missing == status)
-			status = -EFAULT;
+	printk("GD25qxx：spidev_sync_read count = %lu",count);	
+	while(count > 0)
+	{
+		if(count > bufsiz)
+			ready_read_size = bufsiz;   //最多只能读这么多数据
 		else
-			status = status - missing;
-	}
-	mutex_unlock(&spidev->buf_lock);
+			ready_read_size = count;
+		printk("GD25qxx：spidev_sync_read count = %lu  ready_read_size = %lu\n",count,ready_read_size);
+		mutex_lock(&spidev->buf_lock);
+		status = spidev_sync_read(spidev, ready_read_size);
+		if (status <= ready_read_size) {
+			unsigned long	missing;			
+			count -= status;  //减少，已经读到的数据数
 
+			missing = copy_to_user(buf+al_read_size, spidev->rx_buffer, status);
+			if (missing == status)
+			{
+				status = -EFAULT;
+				mutex_unlock(&spidev->buf_lock);
+				return status;
+			}	
+			else{
+				status = status - missing;
+			}
+			al_read_size += status;   //已经读了多少数据
+		}
+		else  //读取出错
+		{
+			printk("GD25qxx：error status > ready_read_size %lu\n",status);
+			mutex_unlock(&spidev->buf_lock);
+			return -EFAULT;
+		}
+		mutex_unlock(&spidev->buf_lock);		
+	}
 	return status;
 }
 
