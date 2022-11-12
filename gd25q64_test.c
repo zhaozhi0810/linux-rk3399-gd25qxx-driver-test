@@ -2,7 +2,7 @@
 * @Author: dazhi
 * @Date:   2022-11-05 15:20:06
 * @Last Modified by:   dazhi
-* @Last Modified time: 2022-11-10 17:21:15
+* @Last Modified time: 2022-11-12 16:48:23
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,9 +44,10 @@ void print_data(const char *title, char *dat, int count)
 
    printf("%s\n",title);
 
+   printf("0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f \n");
    for(i = 0; i < count; i++) 
-   {
-      printf(" 0x%x", dat[i]);
+   {      
+      printf("%02x ", dat[i]);
       if(i%16 == 15)
          printf("\n");
    }
@@ -102,7 +103,7 @@ static void parse_opts(int argc, char *argv[])
          printf("device = %s\n",device);
          break;
       case 'e':
-         erase_sector_offset = atoi(optarg);
+         erase_sector_offset = strtoul(optarg, NULL, 0);//atoi(optarg);
          operation = 2;
          printf("erase_sector_offset = %d\n",erase_sector_offset);
          break;
@@ -116,11 +117,11 @@ static void parse_opts(int argc, char *argv[])
          printf("verbose\n");
          break;
       case 'l':
-         op_lenght = atoi(optarg);
+         op_lenght = strtoul(optarg, NULL, 0);//atoi(optarg);
          printf("op_lenght = %d\n",op_lenght);
          break;
       case 'a':
-         start_address = atoi(optarg);
+         start_address = strtoul(optarg, NULL, 0);//atoi(optarg);
          printf("start_address = %d\n",start_address);
          break;
       case 'w':
@@ -203,7 +204,7 @@ int main(int argc, char *argv[])
 
    if(4==operation || 3==operation)  //文件读写时，缓存大一下
    {
-   		buflen = 4096;   //最多读4096
+   		buflen = 40960;   //最多读4096
    }
 
 
@@ -227,21 +228,34 @@ int main(int argc, char *argv[])
 
    if(!operation || 4==operation)  //读操作
    {
-      printf("operation : read \n");
-
+      printf("operation : read \n");      
       ret = lseek(fd,start_address,SEEK_SET);
-      printf("lseek = %d\n",ret);
-      
-      ret = read(fd, buf, buflen);
-      if(ret < 0)
-      {
-         printf("read from w25qxx error\n");
-         close(fd);
-         return ret;
-      }
-      if(verbose)/*打印数据*/     
-      	print_data("read from w25qxx: \n\r",buf, buflen);
+      printf("start_address = %d lseek = %d\n",start_address,ret);
+      while(op_lenght>0)
+      {	      
+	      ret = read(fd, buf, buflen);
+	      if(ret < 0)
+	      {
+	         printf("read from w25qxx error\n");
+	         close(fd);
+	         return ret;
+	      }
+	      else if(ret == 0)
+	      	break;
 
+
+	      if(verbose)/*打印数据*/     
+	      	print_data("read from w25qxx: \n\r",buf, buflen);
+
+			op_lenght -= ret;
+			if(op_lenght > 4096)
+			{
+				buflen = 4096;   //最多读4096
+			}
+			else
+				buflen = op_lenght;
+
+      }
    }
    else if(1==operation || 3==operation){   //写操作
       printf("operation : write \n");
@@ -262,9 +276,13 @@ int main(int argc, char *argv[])
          {
             //考虑一下文件太大怎么办？
             ret = read(fd_file,buf,buflen);
+            printf("read ret = %d\n",ret);
+
             if(ret > 0)
             {
+            	//print_data("read from w25qxx: \n\r",buf, ret);
                ret = write(fd,buf,ret);
+               printf("write ret = %d\n",ret);
                if(ret < 0)
                {
                   printf("file write to w25qxx error ret = %d\n",ret);
@@ -301,6 +319,7 @@ int main(int argc, char *argv[])
       }
       else
       {
+      	 printf("operation : erase_sector_offset = %d \n",erase_sector_offset);
          ret = lseek(fd,erase_sector_offset,SEEK_SET);
          ret = ioctl(fd, GD25QXX_IOC_SECTOR_ERASE, op_lenght);         
       }

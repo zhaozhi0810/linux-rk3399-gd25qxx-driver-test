@@ -2,7 +2,7 @@
 * @Author: dazhi
 * @Date:   2022-11-08 13:54:23
 * @Last Modified by:   dazhi
-* @Last Modified time: 2022-11-10 17:21:57
+* @Last Modified time: 2022-11-12 17:28:13
 */
 #include <linux/init.h>
 #include <linux/module.h>
@@ -207,6 +207,7 @@ spi_gd25q_sector_erase(struct spidev_data *spidev, unsigned long size)
 	struct spi_message m;
 	unsigned int flash_addr = spidev->cur_addr;
 	int count = (int)size;
+	printk("spi_gd25q_sector_erase flash_addr = %u\n",flash_addr);
 
 	for ( ; count > 0; count -= GD25QXX_SECTOR) {
 		cmd[1] = (unsigned char)((flash_addr & 0xff0000) >> 16);
@@ -217,8 +218,9 @@ spi_gd25q_sector_erase(struct spidev_data *spidev, unsigned long size)
 
 		spi_message_init(&m);
 		spi_message_add_tail(&t, &m);
-		status = spi_sync(spi, &m);
 		spi_gd25q_wait_ready(spi);
+		status = spi_sync(spi, &m);
+		
 		dev_info(&spi->dev,"start addr: %x, sector erase OK\n", flash_addr);
 		flash_addr += GD25QXX_SECTOR;
 	}
@@ -245,8 +247,9 @@ spi_gd25q_32kb_block_erase(struct spidev_data *spidev)
 
 	spi_message_init(&m);
 	spi_message_add_tail(&t, &m);
-	status = spi_sync(spi, &m);
 	spi_gd25q_wait_ready(spi);
+	status = spi_sync(spi, &m);
+	
 	dev_dbg(&spi->dev,"32kb block erase OK\n");
 	return status;
 }
@@ -271,8 +274,9 @@ spi_gd25q_64kb_block_erase(struct spidev_data *spidev)
 
 	spi_message_init(&m);
 	spi_message_add_tail(&t, &m);
-	status = spi_sync(spi, &m);
 	spi_gd25q_wait_ready(spi);
+	status = spi_sync(spi, &m);
+	
 	dev_dbg(&spi->dev,"64kb block erase OK\n");
 	return status;
 }
@@ -292,8 +296,9 @@ static int spi_gd25q_chip_erase(struct spi_device *spi)
 
 	spi_message_init(&m);
 	spi_message_add_tail(&erase, &m);
-	status = spi_sync(spi, &m);
 	spi_gd25q_wait_ready(spi);
+	status = spi_sync(spi, &m);
+	
 	dev_dbg(&spi->dev,"chip erase OK\n");
 	return status;
 }
@@ -436,6 +441,16 @@ spidev_sync_write(struct spidev_data *spidev, size_t len)
 	};
 	struct spi_message	m;
 
+	// int i;
+	// for(i=0;i<len;i++)
+	// {
+	// 	printk("%02x ",spidev->tx_buffer[i]);
+	// 	if(i%16 == 15)
+	// 		printk("\n");
+	// }
+	// printk("\n");
+
+
 	addr[0] = (unsigned char)((spidev->cur_addr & 0xff0000) >> 16);
 	addr[1] = (unsigned char)((spidev->cur_addr & 0xff00) >> 8);
 	addr[2] = (unsigned char)(spidev->cur_addr & 0xff);
@@ -446,8 +461,9 @@ spidev_sync_write(struct spidev_data *spidev, size_t len)
 	spi_message_add_tail(&c[0], &m);
 	spi_message_add_tail(&c[1], &m);
 	spi_message_add_tail(&t, &m);
-	status = spidev_sync(spidev, &m);
 	spi_gd25q_wait_ready(spidev->spi);
+	status = spidev_sync(spidev, &m);
+	
 
 	status -= 4;
 	printk("GD25qxx：spidev_sync_write status = %d  len = %lu\n",status,len);
@@ -492,8 +508,9 @@ static int GD25qxx_read_sector(struct spidev_data *spidev)
 	spi_message_add_tail(&t[0], &m);
 	spi_message_add_tail(&t[1], &m);
 	spi_message_add_tail(&t[2], &m);
-	status = spidev_sync(spidev, &m);
 	spi_gd25q_wait_ready(spidev->spi);
+	status = spidev_sync(spidev, &m);
+	
 	return status;	
 }
 
@@ -529,16 +546,17 @@ static int GD25qxx_write_pages(struct spidev_data *spidev, size_t len)
    int ret = -EINVAL;
    unsigned int remain_of_page,need_to_write;
    unsigned int sector_first_address,sector_offset;
-   unsigned char *write_buf;/*数据缓冲区*/
+//   unsigned int write_address;
+ //  unsigned char *write_buf;/*数据缓冲区*/
    ssize_t total_write;
 
-   write_buf = (unsigned char*)kzalloc(GD25QXX_SECTOR,GFP_KERNEL);  //GD25QXX_SECTOR_SIZE == 4096
-   if(!write_buf)
-       return -ENOMEM;
+   // write_buf = (unsigned char*)kzalloc(GD25QXX_SECTOR,GFP_KERNEL);  //GD25QXX_SECTOR_SIZE == 4096
+   // if(!write_buf)
+   //     return -ENOMEM;
 
    /*获取指定地址所在扇区的扇区首地址*/    //有可能不是一个扇区开始的地址，这里要考虑擦除的时候是一个扇区的擦除。
    sector_first_address = spidev->cur_addr & (~(GD25QXX_SECTOR-1));//(~(GD25Qxx_PAGE_SIZE-1)) ;   //算出是哪个扇区
-
+   //write_address = spidev->cur_addr;
    /*获取指定地址在所在扇区内的偏移量*/
    sector_offset = spidev->cur_addr % GD25QXX_SECTOR;    //扇区内的偏移地址？GD25QXX_SECTOR_SIZE == 4096
 
@@ -551,43 +569,48 @@ static int GD25qxx_write_pages(struct spidev_data *spidev, size_t len)
    {
       return ret;
    }
-   
-   memcpy(write_buf,spidev->rx_buffer,GD25QXX_SECTOR);   //把读取的内容复制到缓存
+   // if(spidev->sector_offset > 0)
+   // 		memcpy(write_buf,spidev->rx_buffer,GD25QXX_SECTOR);   //把读取的内容复制到缓存
+   // 	else
+   // 		memcpy(write_buf,spidev->tx_buffer,GD25QXX_SECTOR);
 
-   printk("GD25qxx：spidev->sector_offset = %lu\n",spidev->sector_offset);
+
+   printk("1.GD25qxx GD25qxx_write_pages：spidev->sector_offset = %lu\n",spidev->sector_offset);
 
    /*判断是否需要擦除*/
    if(GD25qxx_need_erase(&spidev->rx_buffer[spidev->sector_offset],spidev->tx_buffer,len))
    {
-      printk("GD25qxx：GD25qxx：erase\n");
+      printk("2.GD25qxx GD25qxx_write_pages：GD25qxx：erase\n");
       //GD25qxx_erase_sector(GD25q64,sector_first_address);
       spi_gd25q_sector_erase(spidev, GD25QXX_SECTOR-1);
+    //  msleep(500);
       //这一个扇区的内容重新写入，但是要先更新新的内容
-      memcpy(write_buf+spidev->sector_offset,spidev->tx_buffer,len);   //更新内容
-
+    //  memcpy(write_buf+spidev->sector_offset,spidev->tx_buffer,len);   //更新内容
+      memcpy(spidev->tx_buffer,spidev->rx_buffer,spidev->sector_offset);
       remain_of_page = GD25QXX_PAGE_LENGTH;    //从页的第一个字节开始写
       
       len = GD25QXX_SECTOR;   //count的总的字节数应该为整个扇区的字节数。因为写入的字节数的后面可能也有数据
       //sector_offset = 0;   //扇区内的偏移记为0
-      
-      spidev->cur_addr  = sector_first_address;  //写的起始地址
-      memcpy(spidev->tx_buffer,write_buf,remain_of_page);  //准备写入的数据
+      spidev->cur_addr  = sector_first_address;
+      //spidev->cur_addr  = sector_first_address;  //写的起始地址
+      //memcpy(spidev->tx_buffer,write_buf,remain_of_page);  //准备写入的数据
     //  buf = write_buf;    //写入的数据改为读出来的buf
    }
    else //不需要擦除的情况，就直接写入就行。
    {
    		remain_of_page = GD25QXX_PAGE_LENGTH - spidev->cur_addr%GD25QXX_PAGE_LENGTH;//获取本页还剩多少个字节空间可写入
+   	//	spidev->cur_addr  = write_address; 
    }
-      
+    
    need_to_write = remain_of_page;/*下一次最多可写remain_of_page个字节*/
    total_write = 0;
-   printk("GD25qxx：sector_first_address=%d,sector_offset=%d\n",sector_first_address,sector_offset);
+   printk("3.GD25qxx GD25qxx_write_pages：sector_first_address=%d,sector_offset=%d\n",sector_first_address,sector_offset);
 
-   printk("GD25qxx：cur_addr=%u,len=%lu\n",spidev->cur_addr,len);
+   printk("4.GD25qxx：cur_addr=%u,len=%lu\n",spidev->cur_addr,len);
 
    if(len <= need_to_write) //一页以内
    {
-   	 printk("GD25qxx：len <= need_to_write,len=%lu\n",len);
+   	 printk("5.GD25qxx GD25qxx_write_pages：len <= need_to_write,len=%lu\n",len);
       /*需要写入的字节数少于剩余空间  直接写入实际字节数*/
       //ret = GD25qxx_write_page(GD25q64,address,buf,count);
       ret = spidev_sync_write(spidev, len);
@@ -597,21 +620,34 @@ static int GD25qxx_write_pages(struct spidev_data *spidev, size_t len)
    {    
       do
       {
-         printk("GD25qxx：cur_addr =%d ,need_to_write=%d\n",spidev->cur_addr,need_to_write); 
+
+      			int i;
+				for(i=0;i<need_to_write;i++)
+				{
+					printk("%02x ",spidev->tx_buffer[i]);
+					if(i%16 == 15)
+						printk("\n");
+				}
+				printk("\n-----------------------------------------\n");
+    //     printk("6.GD25qxx GD25qxx_write_pages：cur_addr =%d ,need_to_write=%d\n",spidev->cur_addr,need_to_write); 
+    //     printk("6.GD25qxx GD25qxx_write_pages：total_write=%lu\n",total_write); 
          //ret = GD25qxx_write_page(GD25q64,address,buf,need_to_write);
          ret = spidev_sync_write(spidev, need_to_write);
-         if(ret !=0 )
+         if(ret != need_to_write )
          {
+         	printk("7.GD25qxx GD25qxx_write_pages：ret =%d ,need_to_write=%d\n",ret,need_to_write);
             return ret;
          }
+         total_write += ret;
          if(need_to_write == len)
-         {
+         {        	
+//         	 printk("8.GD25qxx GD25qxx_write_pages：（need_to_write == len） =%d\n",need_to_write);
              break;
          }
          else
          {
-            total_write += need_to_write;  //已经写入的字节数 
-            len -=   need_to_write ;   //数据减小          
+         //   total_write += ret;//need_to_write;  //已经写入的字节数 
+            len -=   ret;//need_to_write ;   //数据减小          
             if(len > GD25QXX_PAGE_LENGTH)
             {
                need_to_write = GD25QXX_PAGE_LENGTH;  //最多256字节
@@ -620,15 +656,18 @@ static int GD25qxx_write_pages(struct spidev_data *spidev, size_t len)
             {
                need_to_write = len;
             }
+
             //继续下一次
-            memcpy(spidev->tx_buffer,write_buf+total_write,need_to_write);  //准备写入的数据 
-         }        
+            memcpy(spidev->tx_buffer,spidev->tx_buffer+total_write,need_to_write);  //准备写入的数据 
+         } 
+         printk("!!!9.GD25qxx GD25qxx_write_pages：total_write =%lu ,need_to_write=%d\n",total_write,need_to_write); 
+
       } while (1);  
    }
 
-	kfree(write_buf);
-
-	return ret;
+//	kfree(write_buf);
+	printk("10.GD25qxx GD25qxx_write_pages：total_write =%lu\n",total_write); 
+	return total_write;
 }
 
 
@@ -729,8 +768,9 @@ spidev_sync_read(struct spidev_data *spidev, size_t len)
 	spi_message_add_tail(&t[0], &m);
 	spi_message_add_tail(&t[1], &m);
 	spi_message_add_tail(&t[2], &m);
-	status = spidev_sync(spidev, &m);
 	spi_gd25q_wait_ready(spidev->spi);
+	status = spidev_sync(spidev, &m);
+	
 
 
 	status -= 4;  //多发了4个字节
@@ -797,11 +837,11 @@ spidev_write(struct file *filp, const char __user *buf,
 		size_t count, loff_t *f_pos)
 {
 	struct spidev_data	*spidev;
-	ssize_t			status = 0;
+	ssize_t			status = 0,write_total = 0;
 	unsigned long		missing;
 	size_t need_write;
 	size_t offset;
-//	unsigned char *read_buf;/*数据缓冲区*/
+//	unsigned char *write_buf;/*数据缓冲区*/
 	/* chipselect only toggles at start or end of operation */
 	// if (count > bufsiz)
 	// 	return -EMSGSIZE;
@@ -810,14 +850,19 @@ spidev_write(struct file *filp, const char __user *buf,
 	if((count + spidev->cur_addr) >= spidev->flash_size) //起始地址加上偏移大于flash的大小，应该是太多了，报错
 		return -EMSGSIZE;
 
-	printk( "spidev_write:count = %lu\n", count);
+	// write_buf = (unsigned char*)kzalloc(count,GFP_KERNEL);  //GD25QXX_SECTOR_SIZE == 4096
+ //   if(!write_buf)
+ //       return -ENOMEM;
+
+
+	printk( "1.spidev_write:count = %lu\n", count);
 	
 	if(spidev->wp_gpio != INVALID_GPIO_PIN)
 		gpio_set_value(spidev->wp_gpio, 1);
 	
 	//第一次需要考虑是否在一个扇区内。
 	offset = spidev->cur_addr % GD25QXX_SECTOR;   //起始地址不是起始值，记录这个偏移
-	printk( "spidev_write:first offset = %lu\n", offset);
+	printk( "2.spidev_write:first offset = %lu,pidev->cur_addr = %u\n", offset,spidev->cur_addr);
 	need_write = count;
 	if(count > GD25QXX_SECTOR || offset)  //数据大于4096，或者起始地址不是扇区的起始地址
 	{
@@ -831,20 +876,31 @@ spidev_write(struct file *filp, const char __user *buf,
 			need_write = count;
 		}			
 	}
-	printk("spidev_write:first count = %lu need_write = %lu\n", count,need_write);
+//	printk("3.spidev_write:first count = %lu need_write = %lu\n", count,need_write);
 
 	while(count > 0)
 	{		
-		printk("spidev_write:while count = %lu need_write = %lu\n", count,need_write);
+		printk("4.spidev_write:while count = %lu need_write = %lu\n", count,need_write);
+		printk("!!!4.1.spidev_write:pidev->cur_addr = %u,write_total = %lu,offset = %lu\n", spidev->cur_addr,write_total,offset);
 		spidev->sector_offset = offset;//GD25QXX_SECTOR - need_write;
 		mutex_lock(&spidev->buf_lock);
-		missing = copy_from_user(spidev->tx_buffer, buf, need_write);
-		if (missing == 0)
+		missing = copy_from_user(spidev->tx_buffer+offset, buf, need_write);
+		if (missing == 0){
 		//	status = spidev_sync_write(spidev, need_write);
+				// int i;
+				// for(i=0;i<need_write;i++)
+				// {
+				// 	printk("%02x ",spidev->tx_buffer[i]);
+				// 	if(i%16 == 15)
+				// 		printk("\n");
+				// }
+				// printk("\n-----------------------------------------\n");
 			status = GD25qxx_write_pages(spidev, need_write);
+			write_total += status;
+		}
 		else
 		{
-			printk("spidev_write: ERROR: copy_from_user\n");
+			printk("5.spidev_write: ERROR: copy_from_user\n");
 			status = -EFAULT;
 			mutex_unlock(&spidev->buf_lock);
 			if(spidev->wp_gpio != INVALID_GPIO_PIN)
@@ -862,13 +918,13 @@ spidev_write(struct file *filp, const char __user *buf,
 		else
 			need_write = count;
 
-		printk("spidev_write: count = %lu need_write = %lu\n", count,need_write);
+		printk("++++++6.spidev_write: count = %lu need_write = %lu\n", count,need_write);
 	}
 
 	if(spidev->wp_gpio != INVALID_GPIO_PIN)
 		gpio_set_value(spidev->wp_gpio, 0);
 
-	printk("spidev_write: status = %lu \n", status);
+	printk("+++++7.spidev_write: write_total = %lu \n", write_total);
 	return status;
 }
 
@@ -920,7 +976,7 @@ spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	switch (cmd) {
 	/* read requests */
 	case GD25QXX_IOC_SECTOR_ERASE:
-		retval = spi_gd25q_sector_erase(spidev, arg);
+		retval = spi_gd25q_sector_erase(spidev, arg==0?1:arg);
 		break;
 	case GD25QXX_IOC_32KB_BLOCK_ERASE:
 		retval = spi_gd25q_32kb_block_erase(spidev);
