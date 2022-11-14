@@ -2,7 +2,7 @@
 * @Author: dazhi
 * @Date:   2022-11-08 13:54:23
 * @Last Modified by:   dazhi
-* @Last Modified time: 2022-11-12 17:28:13
+* @Last Modified time: 2022-11-14 16:01:18
 */
 #include <linux/init.h>
 #include <linux/module.h>
@@ -90,7 +90,8 @@ struct spidev_data {
 	u32			speed_hz;
 	unsigned int cur_addr;
 	unsigned wp_gpio;
-	unsigned flash_size;
+	unsigned int flash_id;
+	unsigned int flash_size;
 	ssize_t sector_offset;   //扇区内的偏移
 };
 
@@ -191,7 +192,8 @@ static int spi_read_gd25q_id_0(struct spi_device *spi)
 
 	dev_err(&spi->dev, "ID = %02x %02x %02x\n",
 		rbuf[0], rbuf[1], rbuf[2]);
-	return status;
+
+	return (rbuf[0]<<16| rbuf[1]<<8 | rbuf[2]);
 }
 
 static int
@@ -620,18 +622,6 @@ static int GD25qxx_write_pages(struct spidev_data *spidev, size_t len)
    {    
       do
       {
-
-      			int i;
-				for(i=0;i<need_to_write;i++)
-				{
-					printk("%02x ",spidev->tx_buffer[i]);
-					if(i%16 == 15)
-						printk("\n");
-				}
-				printk("\n-----------------------------------------\n");
-    //     printk("6.GD25qxx GD25qxx_write_pages：cur_addr =%d ,need_to_write=%d\n",spidev->cur_addr,need_to_write); 
-    //     printk("6.GD25qxx GD25qxx_write_pages：total_write=%lu\n",total_write); 
-         //ret = GD25qxx_write_page(GD25q64,address,buf,need_to_write);
          ret = spidev_sync_write(spidev, need_to_write);
          if(ret != need_to_write )
          {
@@ -987,6 +977,15 @@ spidev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case GD25QXX_IOC_CHIP_ERASE:
 		retval = spi_gd25q_chip_erase(spi);
 		break;
+
+	case GD25QXX_IOC_GET_CAPACITY:  //获取芯片容量，dts中给出
+	// 	printk("ioctrl spidev->flash_size = %u\n",spidev->flash_size);
+		retval = __put_user(spidev->flash_size,(__u32 __user *)arg);
+		break;	
+	case GD25QXX_IOC_GET_ID:  //获取芯片ID，probe给出
+	//	printk("ioctrl spidev->flash_id = %u\n",spidev->flash_id);
+		retval = __put_user(spidev->flash_id,(__u32 __user *)arg);
+		break;	
 	case SPI_IOC_RD_MODE:
 		retval = __put_user(spi->mode & SPI_MODE_MASK,
 					(__u8 __user *)arg);
@@ -1311,7 +1310,7 @@ static int spidev_probe(struct spi_device *spi)
     }
 	dev_info(&spi->dev, "get flash_size: %#x \n", spidev->flash_size);
 
-	spi_read_gd25q_id_0(spi);
+	spidev->flash_id = spi_read_gd25q_id_0(spi);
 
 	return status;
 }

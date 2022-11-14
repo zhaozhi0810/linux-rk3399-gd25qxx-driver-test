@@ -2,7 +2,7 @@
 * @Author: dazhi
 * @Date:   2022-11-05 15:20:06
 * @Last Modified by:   dazhi
-* @Last Modified time: 2022-11-12 16:48:23
+* @Last Modified time: 2022-11-14 16:55:43
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,7 +35,8 @@ static char *input_tx = NULL;
 static char *input_filename = NULL;
 static char *output_filename = NULL;
 static int start_address;
-static int op_lenght;
+static int addr_flag = 0;  //设置了地址，就用设置的地址，否则使用当前地址
+static int op_lenght = 16;
 static int operation = 0;   //0读操作，1写操作，2是擦除操作
 
 void print_data(const char *title, char *dat, int count)
@@ -44,7 +45,7 @@ void print_data(const char *title, char *dat, int count)
 
    printf("%s\n",title);
 
-   printf("0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f \n");
+//   printf("0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f \n");
    for(i = 0; i < count; i++) 
    {      
       printf("%02x ", dat[i]);
@@ -119,9 +120,12 @@ static void parse_opts(int argc, char *argv[])
       case 'l':
          op_lenght = strtoul(optarg, NULL, 0);//atoi(optarg);
          printf("op_lenght = %d\n",op_lenght);
+         if(op_lenght<=0)
+            op_lenght = 16;
          break;
       case 'a':
          start_address = strtoul(optarg, NULL, 0);//atoi(optarg);
+         addr_flag = 1;
          printf("start_address = %d\n",start_address);
          break;
       case 'w':
@@ -161,7 +165,8 @@ int main(int argc, char *argv[])
    int fd,ret,i;
    int buflen = 16;    //分配空间的大小
    int fd_file;
-
+   unsigned int id;
+   unsigned int size0;
 //   int count = num;
 //   int offset = 0; 
 //   int rw = -1;  
@@ -186,6 +191,9 @@ int main(int argc, char *argv[])
        start_address = 0;   
 
 
+
+
+
 //   return 0;
 
    /*解析传入的参数*/
@@ -204,10 +212,16 @@ int main(int argc, char *argv[])
 
    if(4==operation || 3==operation)  //文件读写时，缓存大一下
    {
-   		buflen = 40960;   //最多读4096
+   		buflen = 4096;   //最多读4096
+         if(op_lenght>16)
+            buflen = op_lenght;
+   }
+   else if(op_lenght < buflen)
+   {
+      buflen = op_lenght;   //只要这么多长度
    }
 
-
+   printf("buflen = %d\n",buflen);
    buf = malloc(buflen);
    if(!buf)
    {
@@ -225,32 +239,65 @@ int main(int argc, char *argv[])
       return fd;
    }
 
+    ioctl(fd, GD25QXX_IOC_GET_ID, &id);
+    printf("flash id = %#x\n",id);
+
+    ioctl(fd, GD25QXX_IOC_GET_CAPACITY, &size0);
+    printf("flash size = %#x,%d\n",size0,size0);
+
 
    if(!operation || 4==operation)  //读操作
    {
-      printf("operation : read \n");      
-      ret = lseek(fd,start_address,SEEK_SET);
-      printf("start_address = %d lseek = %d\n",start_address,ret);
+      printf("operation : read \n"); 
+      if(addr_flag)     
+         ret = lseek(fd,start_address,SEEK_SET);
+      //   printf("start_address = %d lseek = %d\n",start_address,ret);
+      
+      if(4==operation)
+      {
+         fd_file = open(output_filename,O_WRONLY | O_TRUNC | O_CREAT,0666);   //写
+         if(fd_file < 0)
+         {
+            printf("ERROR: open %s error!\n",output_filename);
+            close(fd);
+            return -1;
+         }
+      }
+
       while(op_lenght>0)
       {	      
 	      ret = read(fd, buf, buflen);
+         printf("read : ret = %d\n",ret);
 	      if(ret < 0)
 	      {
 	         printf("read from w25qxx error\n");
 	         close(fd);
+            if(4==operation)
+               close(fd_file);
+
 	         return ret;
 	      }
 	      else if(ret == 0)
-	      	break;
+	      {
+            if(4==operation)
+               close(fd_file);
+            break;
+         }	
+
+         if(4==operation)
+         {
+            ret = write(fd,buf,ret);
+            printf("write file ret = %d\n",ret);
+         }
 
 
 	      if(verbose)/*打印数据*/     
 	      	print_data("read from w25qxx: \n\r",buf, buflen);
 
 			op_lenght -= ret;
-			if(op_lenght > 4096)
+			if(op_lenght > buflen)
 			{
-				buflen = 4096;   //最多读4096
+				buflen = buflen;   //最多读4096
 			}
 			else
 				buflen = op_lenght;
@@ -260,7 +307,8 @@ int main(int argc, char *argv[])
    else if(1==operation || 3==operation){   //写操作
       printf("operation : write \n");
       
-      lseek(fd,start_address,SEEK_SET);
+      if(addr_flag)
+         lseek(fd,start_address,SEEK_SET);
 
       if(3==operation)
       {
